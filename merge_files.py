@@ -42,27 +42,34 @@ COLOR_DIM = {
     "bg_input": "\033[48;2;22;22;22m"
 }
 
-IGNORE_DIRS = {'.git', 'node_modules', 'venv', 'env', '.venv', '__pycache__', '.idea', '.vscode', 'dist', 'build'}
-IGNORE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.pdf', '.exe', '.dll', '.so', '.dylib', '.zip', '.tar', '.gz', '.7z', '.mp3', '.mp4', '.mkv', '.avi', '.ttf', '.woff', '.woff2', '.eot', '.ico', '.svg', '.pyc', '.class', '.sqlite', '.db'}
+IGNORE_DIRS = {
+    ".git", "node_modules", "venv", "env", ".venv", "__pycache__",
+    ".idea", ".vscode", "dist", "build"
+}
 
-def set_color_mode(dimmed=False):
-    global C_BLUE, C_YELLOW, C_GRAY, C_WHITE, C_DARK_GRAY, C_BOLD, C_BG_INPUT
-    palette = COLOR_DIM if dimmed else COLOR_NORMAL
-    C_BLUE = palette["blue"]
-    C_YELLOW = palette["yellow"]
-    C_GRAY = palette["gray"]
-    C_WHITE = palette["white"]
-    C_DARK_GRAY = palette["dark_gray"]
-    C_BOLD = palette["bold"]
-    C_BG_INPUT = palette["bg_input"]
+ARCHIVE_EXTS = {".zip"}
+
+LOCKED_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg",
+    ".apk", ".exe", ".dll", ".so", ".dylib", ".bin", ".dat",
+    ".db", ".sqlite", ".sqlite3",
+    ".mp3", ".wav", ".ogg", ".flac", ".mp4", ".mkv", ".avi", ".mov",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".ttf", ".otf", ".woff", ".woff2", ".eot",
+    ".class", ".jar", ".dex",
+    ".pyc", ".pyo",
+    ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"
+}
+
+MEMORY_FILE = Path.home() / ".merge_files_memory.json"
 
 old_mode_in = None
 old_mode_out = None
 win32_available = False
 win_mouse_left_down = False
-_input_queue = []  # Очередь для хранения символов при быстрой вставке
+_input_queue = []
 
-if sys.platform == 'win32':
+if sys.platform == "win32":
     import ctypes
     from ctypes import wintypes
 
@@ -117,10 +124,16 @@ if sys.platform == 'win32':
         ]
 
     class EVENT_UNION(ctypes.Union):
-        _fields_ = [("KeyEvent", KEY_EVENT_RECORD), ("MouseEvent", MOUSE_EVENT_RECORD)]
+        _fields_ = [
+            ("KeyEvent", KEY_EVENT_RECORD),
+            ("MouseEvent", MOUSE_EVENT_RECORD)
+        ]
 
     class INPUT_RECORD(ctypes.Structure):
-        _fields_ = [("EventType", wintypes.WORD), ("Event", EVENT_UNION)]
+        _fields_ = [
+            ("EventType", wintypes.WORD),
+            ("Event", EVENT_UNION)
+        ]
 
     hStdIn = kernel32.GetStdHandle(STD_INPUT_HANDLE)
     hStdOut = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
@@ -140,25 +153,23 @@ if sys.platform == 'win32':
     mode_out = ctypes.c_uint32()
     if kernel32.GetConsoleMode(hStdOut, ctypes.byref(mode_out)):
         old_mode_out = mode_out.value
-        new_mode_out = mode_out.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
-        kernel32.SetConsoleMode(hStdOut, new_mode_out)
+        kernel32.SetConsoleMode(hStdOut, mode_out.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
 
-    kernel32.GetNumberOfConsoleInputEvents.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetNumberOfConsoleInputEvents.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD)
+    ]
     kernel32.GetNumberOfConsoleInputEvents.restype = wintypes.BOOL
-    kernel32.ReadConsoleInputW.argtypes = [wintypes.HANDLE, ctypes.POINTER(INPUT_RECORD), wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.ReadConsoleInputW.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(INPUT_RECORD),
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD)
+    ]
     kernel32.ReadConsoleInputW.restype = wintypes.BOOL
     kernel32.FlushConsoleInputBuffer.argtypes = [wintypes.HANDLE]
     kernel32.FlushConsoleInputBuffer.restype = wintypes.BOOL
 
-def restore_console():
-    if sys.platform == 'win32' and old_mode_in is not None:
-        kernel32.SetConsoleMode(hStdIn, old_mode_in)
-        if old_mode_out is not None:
-            kernel32.SetConsoleMode(hStdOut, old_mode_out)
-
-atexit.register(restore_console)
-
-MEMORY_FILE = Path.home() / ".merge_files_memory.json"
 
 T = {
     "en": {
@@ -181,17 +192,20 @@ T = {
         "lang_updated": "Language successfully updated.",
         "target_dir": "Target Directory",
         "input": "Input",
-        "enter_path": "Enter path, or Drag & Drop folder/files here",
+        "enter_path": "Enter one or several paths to folders/files/ZIP archives. Use quotes for paths with spaces.",
         "path": "Path:",
         "err_not_found": "Error: Path or file not found.",
         "err_permission": "Error: Access denied (PermissionError).",
-        "err_empty": "Folder is empty.",
+        "err_empty": "Nothing to extract.",
+        "err_bad_archive": "Error: ZIP archive is corrupted or cannot be opened.",
         "select_files": "Select Files",
-        "dir": "Directory",
+        "dir": "Source",
+        "sources": "Sources",
         "files": "Files",
         "selected": "Selected:",
         "of": "of",
-        "tip_toggle": "Type numbers to toggle, 0 to start, or Drag & Drop additional files here",
+        "locked": "locked",
+        "tip_toggle": "Type numbers to toggle, 0 to start, or Drag & Drop additional files/ZIP archives/folders here",
         "toggle": "Toggle:",
         "err_no_selected": "No files selected.",
         "success": "Success",
@@ -220,17 +234,20 @@ T = {
         "lang_updated": "Язык успешно обновлен.",
         "target_dir": "Целевая папка",
         "input": "Ввод",
-        "enter_path": "Введите путь, либо перетащите папку/файлы (Drag & Drop)",
+        "enter_path": "Введите один или несколько путей к папкам/файлам/ZIP-архивам. Пути с пробелами лучше брать в кавычки.",
         "path": "Путь:",
-        "err_not_found": "Ошибка: Путь или файл не найден.",
-        "err_permission": "Ошибка: Нет доступа к папке (PermissionError).",
-        "err_empty": "Папка пуста.",
+        "err_not_found": "Ошибка: путь или файл не найден.",
+        "err_permission": "Ошибка: нет доступа к папке (PermissionError).",
+        "err_empty": "Нечего извлекать.",
+        "err_bad_archive": "Ошибка: ZIP-архив поврежден или не может быть открыт.",
         "select_files": "Выбор файлов",
-        "dir": "Директория",
+        "dir": "Источник",
+        "sources": "Источники",
         "files": "Файлы",
         "selected": "Выбрано:",
         "of": "из",
-        "tip_toggle": "Введите номера для выбора, 0 для старта, или перетащите сюда еще файлы",
+        "locked": "заблок.",
+        "tip_toggle": "Введите номера для выбора, 0 для старта, или перетащите сюда еще файлы/ZIP-архивы/папки",
         "toggle": "Выбор:",
         "err_no_selected": "Файлы не выбраны.",
         "success": "Успешно",
@@ -259,17 +276,20 @@ T = {
         "lang_updated": "语言已成功更新。",
         "target_dir": "目标目录",
         "input": "输入",
-        "enter_path": "输入路径，或将文件夹/文件拖放到此处 (Drag & Drop)",
+        "enter_path": "输入一个或多个文件夹/文件/ZIP 压缩包路径。带空格的路径建议加引号。",
         "path": "路径:",
         "err_not_found": "错误: 找不到路径或文件。",
         "err_permission": "错误: 拒绝访问 (PermissionError)。",
-        "err_empty": "文件夹为空。",
+        "err_empty": "没有可提取的内容。",
+        "err_bad_archive": "错误: ZIP 文件损坏或无法打开。",
         "select_files": "选择文件",
-        "dir": "目录",
+        "dir": "来源",
+        "sources": "来源",
         "files": "文件",
         "selected": "已选择:",
         "of": "/",
-        "tip_toggle": "输入数字进行切换，输入 0 提取，或拖放更多文件到此处",
+        "locked": "锁定",
+        "tip_toggle": "输入数字切换，输入 0 开始，或拖放更多文件/ZIP 压缩包/文件夹",
         "toggle": "切换:",
         "err_no_selected": "未选择任何文件。",
         "success": "成功",
@@ -280,27 +300,54 @@ T = {
     }
 }
 
+
+def restore_console():
+    if sys.platform == "win32" and old_mode_in is not None:
+        kernel32.SetConsoleMode(hStdIn, old_mode_in)
+        if old_mode_out is not None:
+            kernel32.SetConsoleMode(hStdOut, old_mode_out)
+
+
+atexit.register(restore_console)
+
+
+def set_color_mode(dimmed=False):
+    global C_BLUE, C_YELLOW, C_GRAY, C_WHITE, C_DARK_GRAY, C_BOLD, C_BG_INPUT
+    palette = COLOR_DIM if dimmed else COLOR_NORMAL
+    C_BLUE = palette["blue"]
+    C_YELLOW = palette["yellow"]
+    C_GRAY = palette["gray"]
+    C_WHITE = palette["white"]
+    C_DARK_GRAY = palette["dark_gray"]
+    C_BOLD = palette["bold"]
+    C_BG_INPUT = palette["bg_input"]
+
+
 class RawInput:
     def __enter__(self):
-        if sys.platform != 'win32':
-            import tty, termios
+        if sys.platform != "win32":
+            import tty
+            import termios
             self.fd = sys.stdin.fileno()
             self.old = termios.tcgetattr(self.fd)
             tty.setcbreak(self.fd)
         return self
 
     def __exit__(self, *args):
-        if sys.platform != 'win32':
+        if sys.platform != "win32":
             import termios
             termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
+
 
 def char_width(ch):
     if unicodedata.combining(ch):
         return 0
     return 2 if unicodedata.east_asian_width(ch) in ("F", "W") else 1
 
+
 def text_width(text):
     return sum(char_width(ch) for ch in str(text))
+
 
 def truncate_text(text, max_len):
     text = str(text)
@@ -321,16 +368,105 @@ def truncate_text(text, max_len):
         width += cw
     return result + "..."
 
+
 def pad_text(text, width):
-    text = str(text)
-    return text + " " * max(0, width - text_width(text))
+    return str(text) + " " * max(0, width - text_width(text))
+
+
+def get_term_width():
+    try:
+        return os.get_terminal_size().columns
+    except OSError:
+        return 80
+
+
+def get_layout():
+    tw = get_term_width()
+    bw = max(10, min(tw - 4, 70))
+    return tw, bw, " " * max(0, (tw - bw) // 2)
+
+
+def clear_screen(lines=18):
+    sys.stdout.write(f"{C_RESET}\033[2J\033[H")
+    try:
+        th = os.get_terminal_size().lines
+        v_pad = max(0, (th - lines) // 2)
+        if v_pad > 0:
+            sys.stdout.write("\n" * v_pad)
+    except OSError:
+        pass
+    sys.stdout.flush()
+
+
+def print_wrapped_text(text, m, bw, color=C_GRAY):
+    lines = textwrap.wrap(
+        str(text),
+        width=max(10, bw),
+        break_long_words=False,
+        break_on_hyphens=False
+    )
+    if not lines:
+        print()
+        return
+    for line in lines:
+        print(f"{m}{color}{line}{C_RESET}")
+
+
+def print_tip(text, m, bw):
+    lines = textwrap.wrap(
+        str(text),
+        width=max(10, bw - 6),
+        break_long_words=False,
+        break_on_hyphens=False
+    )
+    if lines:
+        print(f"\n{m}{C_YELLOW}● Tip{C_RESET} {C_GRAY}{lines[0]}{C_RESET}")
+        for line in lines[1:]:
+            print(f"{m}      {C_GRAY}{line}{C_RESET}")
+    print()
+
+
+def draw_logo():
+    ASCII_LOGO = [
+        "██^^^^ ██ ██     ██^^^^   ▄█████ ██     ██ ",
+        "██^^   ██ ██     ██^^     ██~~~~ ██     ██ ",
+        "██     ██ ██████ ██████   ▀█████ ██████ ██ ",
+        "~~     ~~ ~~~~~~ ~~~~~~    ~~~~~ ~~~~~~ ~~ "
+    ]
+
+    C_SHADOW_FG = "\033[38;2;90;90;40m"
+    C_SHADOW_BG = "\033[48;2;90;90;40m"
+
+    if C_YELLOW == COLOR_DIM["yellow"]:
+        C_SHADOW_FG = "\033[38;2;34;34;16m"
+        C_SHADOW_BG = "\033[48;2;34;34;16m"
+
+    tw = get_term_width()
+    indent = " " * max(0, (tw - len(ASCII_LOGO[0])) // 2)
+
+    print()
+    for line in ASCII_LOGO:
+        rendered = indent
+        for char in line:
+            if char == "_":
+                rendered += f"{C_SHADOW_BG} {C_RESET}"
+            elif char == "^":
+                rendered += f"{C_YELLOW}{C_SHADOW_BG}▀{C_RESET}"
+            elif char == "~":
+                rendered += f"{C_SHADOW_FG}▀{C_RESET}"
+            else:
+                rendered += f"{C_YELLOW}{char}{C_RESET}"
+        print(rendered)
+    print("\n")
+
 
 def flush_input_events():
     global win_mouse_left_down, _input_queue
     win_mouse_left_down = False
-    if sys.platform == 'win32' and win32_available:
+
+    if sys.platform == "win32" and win32_available:
         kernel32.FlushConsoleInputBuffer(hStdIn)
-    elif sys.platform == 'win32':
+    elif sys.platform == "win32":
         try:
             import msvcrt
             while msvcrt.kbhit():
@@ -349,369 +485,804 @@ def flush_input_events():
         except Exception:
             pass
 
+
 def parse_vt_sequence(seq):
-    if seq == '\x1b[A':
-        return 'UP'
-    if seq == '\x1b[B':
-        return 'DOWN'
-    if seq.startswith('\x1b[<') and seq.endswith(('M', 'm')):
-        parts = seq[3:-1].split(';')
+    if seq == "\x1b[A":
+        return "UP"
+    if seq == "\x1b[B":
+        return "DOWN"
+    if seq == "\x1b[C":
+        return "RIGHT"
+    if seq == "\x1b[D":
+        return "LEFT"
+
+    if seq.startswith("\x1b[<") and seq.endswith(("M", "m")):
+        parts = seq[3:-1].split(";")
         if len(parts) == 3:
-            cb, cx, cy = parts
             try:
-                cb = int(cb)
-                cx = int(cx)
-                cy = int(cy)
+                cb = int(parts[0])
+                cx = int(parts[1])
+                cy = int(parts[2])
                 final = seq[-1]
+
                 if cb & 64:
-                    return 'IGNORE'
-                if final == 'M':
+                    return "IGNORE"
+
+                if final == "M":
                     if cb & 32:
-                        return ('HOVER', cx, cy)
+                        return ("HOVER", cx, cy)
                     if (cb & 3) == 0:
-                        return ('CLICK', cx, cy)
-                    return ('HOVER', cx, cy)
-                return 'IGNORE'
+                        return ("CLICK", cx, cy)
+                    return ("HOVER", cx, cy)
+
+                return "IGNORE"
             except ValueError:
                 pass
-    if seq.startswith('\x1b[M') and len(seq) >= 6:
+
+    if seq.startswith("\x1b[M") and len(seq) >= 6:
         try:
             cb = ord(seq[3]) - 32
             cx = ord(seq[4]) - 32
             cy = ord(seq[5]) - 32
+
             if cb & 64:
-                return 'IGNORE'
+                return "IGNORE"
             if cb & 32:
-                return ('HOVER', cx, cy)
+                return ("HOVER", cx, cy)
             if (cb & 3) == 0:
-                return ('CLICK', cx, cy)
-            return ('HOVER', cx, cy)
+                return ("CLICK", cx, cy)
+            return ("HOVER", cx, cy)
         except Exception:
             pass
-    return seq
+
+    return "IGNORE"
+
 
 def get_win32_event():
     global win_mouse_left_down
+
     count = wintypes.DWORD()
+
     if not kernel32.GetNumberOfConsoleInputEvents(hStdIn, ctypes.byref(count)):
         time.sleep(0.01)
         return None
+
     if count.value == 0:
         time.sleep(0.01)
         return None
+
     record = INPUT_RECORD()
     read = wintypes.DWORD()
+
     while count.value > 0:
         if not kernel32.ReadConsoleInputW(hStdIn, ctypes.byref(record), 1, ctypes.byref(read)):
             time.sleep(0.01)
             return None
+
         kernel32.GetNumberOfConsoleInputEvents(hStdIn, ctypes.byref(count))
+
         if record.EventType == KEY_EVENT:
             key = record.Event.KeyEvent
             if not key.bKeyDown:
                 continue
+
             vk = key.wVirtualKeyCode
             ch = key.uChar
             ctrl = key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)
+
             if ctrl and vk == VK_C:
                 raise KeyboardInterrupt
             if vk == VK_ESCAPE:
-                return 'ESC'
+                return "ESC"
             if vk == VK_RETURN:
-                return 'ENTER'
+                return "ENTER"
             if vk == VK_BACK:
-                return 'BACKSPACE'
+                return "BACKSPACE"
             if vk == VK_UP:
-                return 'UP'
+                return "UP"
             if vk == VK_DOWN:
-                return 'DOWN'
-            if ch and ch not in ('\x00', '\r', '\n', '\b', '\x1b'):
+                return "DOWN"
+
+            if ch and ch not in ("\x00", "\r", "\n", "\b", "\x1b"):
                 return ch
+
         elif record.EventType == MOUSE_EVENT:
             mouse = record.Event.MouseEvent
             x = int(mouse.dwMousePosition.X) + 1
             y = int(mouse.dwMousePosition.Y) + 1
             flags = mouse.dwEventFlags
             left_down = bool(mouse.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)
+
             if flags == MOUSE_MOVED:
                 win_mouse_left_down = left_down
-                return ('HOVER', x, y)
+                return ("HOVER", x, y)
+
             if flags == 0:
                 if left_down and not win_mouse_left_down:
                     win_mouse_left_down = True
-                    return ('CLICK', x, y)
+                    return ("CLICK", x, y)
                 if not left_down:
                     win_mouse_left_down = False
-                    return 'IGNORE'
+                    return "IGNORE"
+
             if flags in (DOUBLE_CLICK, MOUSE_WHEELED, MOUSE_HWHEELED):
-                return 'IGNORE'
+                return "IGNORE"
+
     return None
+
 
 def get_event():
     global _input_queue
-    if sys.platform == 'win32' and win32_available:
+
+    if sys.platform == "win32" and win32_available:
         return get_win32_event()
-    elif sys.platform == 'win32':
+
+    if sys.platform == "win32":
         import msvcrt
+
         if msvcrt.kbhit():
             ch = msvcrt.getwch()
-            if ch == '\x1b':
+
+            if ch == "\x1b":
+                time.sleep(0.08)
                 seq = "\x1b"
-                time.sleep(0.01)
+
                 while msvcrt.kbhit():
                     seq += msvcrt.getwch()
-                if seq == '\x1b':
-                    return 'ESC'
+
+                if seq == "\x1b":
+                    return "ESC"
+
                 return parse_vt_sequence(seq)
-            elif ch in ('\r', '\n'):
-                return 'ENTER'
-            elif ch == '\b':
-                return 'BACKSPACE'
-            elif ch == '\x03':
+
+            if ch in ("\r", "\n"):
+                return "ENTER"
+
+            if ch == "\b":
+                return "BACKSPACE"
+
+            if ch == "\x03":
                 raise KeyboardInterrupt
-            elif ch in ('\x00', '\xe0'):
-                ch2 = msvcrt.getwch()
-                if ch2 == 'H':
-                    return 'UP'
-                elif ch2 == 'P':
-                    return 'DOWN'
-            else:
-                return ch
+
+            if ch in ("\x00", "\xe0"):
+                if msvcrt.kbhit():
+                    ch2 = msvcrt.getwch()
+                    if ch2 == "H":
+                        return "UP"
+                    if ch2 == "P":
+                        return "DOWN"
+                    if ch2 == "K":
+                        return "LEFT"
+                    if ch2 == "M":
+                        return "RIGHT"
+                return "IGNORE"
+
+            return ch
+
         time.sleep(0.01)
         return None
-    else:
-        import select
+
+    import select
+
+    if not _input_queue:
+        r, _, _ = select.select([sys.stdin], [], [], 0.05)
+        if r:
+            try:
+                data = os.read(sys.stdin.fileno(), 4096).decode("utf-8", errors="replace")
+                _input_queue.extend(list(data))
+            except Exception:
+                pass
+
+    if not _input_queue:
+        return None
+
+    ch = _input_queue.pop(0)
+
+    if ch == "\x1b":
+        seq = "\x1b"
+
         if not _input_queue:
-            r, _, _ = select.select([sys.stdin], [], [], 0.05)
-            if r:
+            r2, _, _ = select.select([sys.stdin], [], [], 0.18)
+            if r2:
                 try:
-                    data = os.read(sys.stdin.fileno(), 4096).decode('utf-8', errors='replace')
+                    data = os.read(sys.stdin.fileno(), 4096).decode("utf-8", errors="replace")
                     _input_queue.extend(list(data))
                 except Exception:
                     pass
 
-        if not _input_queue:
-            return None
+        if _input_queue and _input_queue[0] in ("[", "O", "]"):
+            seq += _input_queue.pop(0)
 
-        ch = _input_queue.pop(0)
+            while True:
+                if not _input_queue:
+                    r3, _, _ = select.select([sys.stdin], [], [], 0.03)
+                    if r3:
+                        try:
+                            data = os.read(sys.stdin.fileno(), 4096).decode("utf-8", errors="replace")
+                            _input_queue.extend(list(data))
+                        except Exception:
+                            pass
+                    else:
+                        break
 
-        if ch == '\x1b':
-            seq = '\x1b'
-            if not _input_queue:
-                r2, _, _ = select.select([sys.stdin], [], [], 0.02)
-                if r2:
-                    try:
-                        data = os.read(sys.stdin.fileno(), 4096).decode('utf-8', errors='replace')
-                        _input_queue.extend(list(data))
-                    except Exception:
-                        pass
-            if _input_queue and _input_queue[0] in ('[', 'O'):
-                seq += _input_queue.pop(0)
+                if _input_queue:
+                    next_ch = _input_queue.pop(0)
+                    seq += next_ch
+
+                    if next_ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz~Mm":
+                        break
+                else:
+                    break
+
+            if seq.startswith("\x1b[200~"):
+                pasted = []
+
                 while True:
                     if not _input_queue:
-                        r3, _, _ = select.select([sys.stdin], [], [], 0.01)
-                        if r3:
+                        r4, _, _ = select.select([sys.stdin], [], [], 0.03)
+                        if r4:
                             try:
-                                data = os.read(sys.stdin.fileno(), 4096).decode('utf-8', errors='replace')
+                                data = os.read(sys.stdin.fileno(), 4096).decode("utf-8", errors="replace")
                                 _input_queue.extend(list(data))
                             except Exception:
                                 pass
-                        else:
-                            break
-                    if _input_queue:
-                        next_ch = _input_queue.pop(0)
-                        seq += next_ch
-                        if next_ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz~M':
-                            break
-                    else:
+
+                    if not _input_queue:
                         break
-                return parse_vt_sequence(seq)
-            else:
-                return 'ESC'
-        elif ch in ('\n', '\r'):
-            return 'ENTER'
-        elif ch in ('\x7f', '\b'):
-            return 'BACKSPACE'
-        elif ch == '\x03':
-            raise KeyboardInterrupt
-        elif ch == '\x04':
-            raise EOFError
-        else:
-            return ch
+
+                    c = _input_queue.pop(0)
+                    pasted.append(c)
+
+                    if "".join(pasted).endswith("\x1b[201~"):
+                        text = "".join(pasted)[:-6]
+                        _input_queue = list(text) + _input_queue
+                        return "IGNORE"
+
+            return parse_vt_sequence(seq)
+
+        return "ESC"
+
+    if ch in ("\n", "\r"):
+        return "ENTER"
+
+    if ch in ("\x7f", "\b"):
+        return "BACKSPACE"
+
+    if ch == "\x03":
+        raise KeyboardInterrupt
+
+    if ch == "\x04":
+        raise EOFError
+
+    return ch
+
 
 def clean_path(p):
     if not p:
         return p
-    p = p.strip(' "\'\r\n\t')
+
+    p = p.strip(" \r\n\t")
+
+    if (p.startswith('"') and p.endswith('"')) or (p.startswith("'") and p.endswith("'")):
+        p = p[1:-1]
+
+    p = p.strip(" \r\n\t")
+
     if p.startswith("file://"):
         p = p[7:]
         p = urllib.parse.unquote(p)
-        if sys.platform == 'win32' and p.startswith('/') and len(p) > 2 and p[2] == ':':
+
+        if sys.platform == "win32" and p.startswith("/") and len(p) > 2 and p[2] == ":":
             p = p[1:]
-    if sys.platform == 'win32' and p.startswith('/') and len(p) >= 2 and p[1].isalpha() and (len(p) == 2 or p[2] == '/'):
+
+    if sys.platform == "win32" and p.startswith("/") and len(p) >= 2 and p[1].isalpha() and (len(p) == 2 or p[2] == "/"):
         p = p[1] + ":" + p[2:]
+
     p = os.path.expanduser(p)
     p = os.path.normpath(p)
     return p
 
-def parse_dropped_paths(raw_input):
-    c_path = clean_path(raw_input)
-    if os.path.exists(c_path):
-        return [c_path]
+
+def split_paths_smart(raw_input):
+    if not raw_input:
+        return []
+
+    raw_input = raw_input.strip()
+
+    single = clean_path(raw_input)
+    if os.path.exists(single):
+        return [single]
+
     try:
-        tokens = shlex.split(raw_input, posix=(os.name == 'posix'))
+        tokens = shlex.split(raw_input, posix=(os.name == "posix"))
     except ValueError:
         tokens = raw_input.split()
-    valid = []
-    for t in tokens:
-        ct = clean_path(t)
-        if os.path.exists(ct):
-            valid.append(ct)
-    return valid
 
-def detect_encoding(filepath):
-    try:
-        with open(filepath, 'rb') as f:
-            raw = f.read(8192)
-    except Exception:
-        return 'utf-8'
-    for enc in ['utf-8-sig', 'utf-8', 'utf-16', 'cp1251', 'cp1252']:
+    result = []
+    i = 0
+
+    while i < len(tokens):
+        best = None
+        best_j = None
+
+        for j in range(i, len(tokens)):
+            candidate = " ".join(tokens[i:j + 1])
+            candidate_clean = clean_path(candidate)
+
+            if os.path.exists(candidate_clean):
+                best = candidate_clean
+                best_j = j
+
+        if best is not None:
+            result.append(best)
+            i = best_j + 1
+        else:
+            candidate_clean = clean_path(tokens[i])
+            if os.path.exists(candidate_clean):
+                result.append(candidate_clean)
+            i += 1
+
+    return result
+
+
+def parse_dropped_paths(raw_input):
+    return split_paths_smart(raw_input)
+
+
+def path_ext(name):
+    return os.path.splitext(str(name).lower())[1]
+
+
+def is_zip_name(name):
+    return path_ext(name) == ".zip"
+
+
+def is_archive_path(path):
+    return os.path.isfile(path) and is_zip_name(path)
+
+
+def is_locked_file(name):
+    return path_ext(name) in LOCKED_EXTS
+
+
+def normalize_arc_name(name):
+    return str(name).replace("\\", "/")
+
+
+def safe_rel_path(path, root):
+    return os.path.relpath(path, root).replace("\\", "/")
+
+
+def detect_encoding_from_bytes(raw):
+    for enc in ["utf-8-sig", "utf-8", "utf-16", "cp1251", "cp1252"]:
         try:
             raw.decode(enc)
             return enc
         except UnicodeDecodeError:
             continue
-    return 'utf-8'
+    return "utf-8"
 
-def is_binary(filepath):
-    ext = os.path.splitext(filepath)[1].lower()
-    if ext in IGNORE_EXTS:
-        return True
+
+def detect_encoding(filepath):
     try:
-        with open(filepath, 'rb') as f:
-            return b'\0' in f.read(1024)
+        with open(filepath, "rb") as f:
+            raw = f.read(8192)
     except Exception:
-        return False
+        return "utf-8"
+
+    return detect_encoding_from_bytes(raw)
+
 
 def load_memory():
     if MEMORY_FILE.exists():
         try:
-            with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             return {}
     return {}
 
+
 def save_memory(target_dir, disabled_files):
     memory = load_memory()
-    abs_dir = os.path.abspath(target_dir)
-    memory[abs_dir] = {"disabled_files": disabled_files}
+    memory[os.path.abspath(target_dir)] = {"disabled_files": disabled_files}
+
     try:
-        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
             json.dump(memory, f, ensure_ascii=False, indent=4)
     except IOError:
         pass
 
+
 def get_default_download_path():
-    if sys.platform == 'win32':
-        return os.path.join(os.environ.get('USERPROFILE', ''), 'Downloads')
-    elif 'ANDROID_ROOT' in os.environ:
-        return '/storage/emulated/0/Download'
-    else:
-        return os.path.join(str(Path.home()), 'Downloads')
+    if sys.platform == "win32":
+        return os.path.join(os.environ.get("USERPROFILE", ""), "Downloads")
+    if "ANDROID_ROOT" in os.environ:
+        return "/storage/emulated/0/Download"
+    return os.path.join(str(Path.home()), "Downloads")
+
 
 def load_config():
     mem = load_memory()
     conf = mem.get("_config_", {})
     lang = conf.get("lang", "en")
     out = conf.get("out", get_default_download_path())
+
+    if lang not in T:
+        lang = "en"
+
     return lang, clean_path(out)
+
 
 def save_config(lang, out):
     mem = load_memory()
     mem["_config_"] = {"lang": lang, "out": out}
+
     try:
-        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
             json.dump(mem, f, ensure_ascii=False, indent=4)
     except IOError:
         pass
 
-def get_term_width():
-    try:
-        return os.get_terminal_size().columns
-    except OSError:
-        return 80
 
-def get_layout():
-    tw = get_term_width()
-    bw = max(10, min(tw - 4, 70))
-    m_len = max(0, (tw - bw) // 2)
-    return tw, bw, " " * m_len
+def draw_header(m, bw, title):
+    spaces = " " * max(1, bw - text_width(title) - 3)
+    print(f"{m}{C_WHITE}{C_BOLD}{title}{C_RESET}{spaces}{C_GRAY}esc{C_RESET}\n")
 
-def clear_screen(lines=18):
-    sys.stdout.write(f"{C_RESET}\033[2J\033[H")
-    try:
-        th = os.get_terminal_size().lines
-        v_pad = max(0, (th - lines) // 2)
-        if v_pad > 0:
-            sys.stdout.write("\n" * v_pad)
-    except OSError:
-        pass
-    sys.stdout.flush()
 
-def draw_logo():
-    ASCII_LOGO = [
-        "██^^^^ ██ ██     ██^^^^   ▄█████ ██     ██ ",
-        "██^^   ██ ██     ██^^     ██~~~~ ██     ██ ",
-        "██     ██ ██████ ██████   ▀█████ ██████ ██ ",
-        "~~     ~~ ~~~~~~ ~~~~~~    ~~~~~ ~~~~~~ ~~ "
-    ]
-    C_SHADOW_FG = "\033[38;2;90;90;40m"
-    C_SHADOW_BG = "\033[48;2;90;90;40m"
-    if C_YELLOW == COLOR_DIM["yellow"]:
-        C_SHADOW_FG = "\033[38;2;34;34;16m"
-        C_SHADOW_BG = "\033[48;2;34;34;16m"
-    tw = get_term_width()
-    logo_width = len(ASCII_LOGO[0])
-    indent = " " * max(0, (tw - logo_width) // 2)
-    print()
-    for line in ASCII_LOGO:
-        rendered_line = indent
-        for char in line:
-            if char == '_':
-                rendered_line += f"{C_SHADOW_BG} {C_RESET}"
-            elif char == '^':
-                rendered_line += f"{C_YELLOW}{C_SHADOW_BG}▀{C_RESET}"
-            elif char == '~':
-                rendered_line += f"{C_SHADOW_FG}▀{C_RESET}"
+def draw_menu_item(m, num, text):
+    print(f"{m}{C_YELLOW}{num}{C_RESET}  {C_WHITE}{text}{C_RESET}")
+
+
+def draw_sys_item(m, bw, label, value):
+    label_disp = label + "   "
+    val_disp = truncate_text(value, bw - text_width(label_disp))
+    print(f"{m}{C_WHITE}{label_disp}{C_RESET}{C_GRAY}{val_disp}{C_RESET}")
+
+
+def make_file_item(source_type, display_name, selected=True, locked=False, lock_reason="", **kwargs):
+    if is_locked_file(display_name):
+        selected = False
+        locked = True
+        if not lock_reason:
+            lock_reason = "Unsupported binary file type"
+
+    item = {
+        "source": source_type,
+        "name": normalize_arc_name(display_name),
+        "selected": selected,
+        "locked": locked,
+        "lock_reason": lock_reason
+    }
+
+    item.update(kwargs)
+    return item
+
+
+def item_unique_key(item):
+    if item.get("source") == "file":
+        return ("file", os.path.abspath(item.get("path", "")))
+
+    if item.get("source") == "archive":
+        return (
+            "archive",
+            os.path.abspath(item.get("archive_path", "")),
+            item.get("member_chain", ""),
+            item.get("name", "")
+        )
+
+    return (item.get("source"), item.get("name", ""))
+
+
+def add_unique_item(file_data, item):
+    key = item_unique_key(item)
+
+    for old in file_data:
+        if item_unique_key(old) == key:
+            if not old.get("locked"):
+                old["selected"] = True
+            return
+
+    file_data.append(item)
+
+
+def collect_from_folder(folder_path, root_folder=None):
+    folder_path = os.path.abspath(folder_path)
+
+    if root_folder is None:
+        root_folder = folder_path
+
+    result = []
+
+    for current_root, dirs, files in os.walk(folder_path):
+        dirs[:] = [d for d in sorted(dirs) if d not in IGNORE_DIRS]
+
+        for filename in sorted(files):
+            full_path = os.path.join(current_root, filename)
+            rel_name = safe_rel_path(full_path, root_folder)
+
+            if filename.startswith("extracted_data_") and filename.endswith(".txt"):
+                continue
+
+            if is_archive_path(full_path):
+                result.extend(collect_from_archive_path(full_path, prefix=rel_name))
             else:
-                rendered_line += f"{C_YELLOW}{char}{C_RESET}"
-        print(rendered_line)
-    print("\n")
+                result.append(
+                    make_file_item(
+                        "file",
+                        rel_name,
+                        path=os.path.abspath(full_path),
+                        root=os.path.abspath(root_folder)
+                    )
+                )
 
-def print_tip(text, m, bw):
-    lines = textwrap.wrap(text, width=max(10, bw - 6))
-    if lines:
-        print(f"\n{m}{C_YELLOW}● Tip{C_RESET} {C_GRAY}{lines[0]}{C_RESET}")
-        for line in lines[1:]:
-            print(f"{m}      {C_GRAY}{line}{C_RESET}")
-    print()
+    return result
+
+
+def collect_from_zip_fileobj(fileobj, archive_label, prefix="", outer_chain=""):
+    result = []
+
+    with zipfile.ZipFile(fileobj, "r") as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+
+            member_name = normalize_arc_name(info.filename)
+            base = os.path.basename(member_name)
+
+            if not base:
+                continue
+
+            display_name = normalize_arc_name(os.path.join(prefix, member_name)) if prefix else member_name
+
+            if base.startswith("extracted_data_") and base.endswith(".txt"):
+                continue
+
+            chain = f"{outer_chain}::{member_name}" if outer_chain else member_name
+
+            if is_zip_name(base):
+                try:
+                    with zf.open(info, "r") as src:
+                        result.extend(
+                            collect_nested_zip_stream(
+                                src,
+                                base,
+                                archive_label,
+                                nested_prefix=display_name,
+                                outer_chain=chain
+                            )
+                        )
+                except Exception:
+                    result.append(
+                        make_file_item(
+                            "archive",
+                            display_name,
+                            selected=False,
+                            locked=True,
+                            lock_reason="Nested ZIP read error",
+                            archive_type="zip",
+                            archive_path=archive_label,
+                            member_chain=chain
+                        )
+                    )
+            else:
+                result.append(
+                    make_file_item(
+                        "archive",
+                        display_name,
+                        archive_type="zip",
+                        archive_path=archive_label,
+                        member_chain=chain
+                    )
+                )
+
+    return result
+
+
+def collect_nested_zip_stream(stream, nested_name, root_archive_label, nested_prefix="", outer_chain=""):
+    tmp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+            tmp_path = tmp.name
+
+            while True:
+                chunk = stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+
+        with open(tmp_path, "rb") as f:
+            return collect_from_zip_fileobj(
+                f,
+                root_archive_label,
+                prefix=nested_prefix,
+                outer_chain=outer_chain
+            )
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+
+def collect_from_archive_path(archive_path, prefix=""):
+    archive_path = os.path.abspath(archive_path)
+
+    try:
+        with open(archive_path, "rb") as f:
+            return collect_from_zip_fileobj(
+                f,
+                archive_path,
+                prefix=prefix,
+                outer_chain=""
+            )
+    except Exception:
+        return [
+            make_file_item(
+                "archive",
+                prefix or os.path.basename(archive_path),
+                selected=False,
+                locked=True,
+                lock_reason="Bad ZIP archive",
+                archive_type="zip",
+                archive_path=archive_path,
+                member_chain=""
+            )
+        ]
+
+
+def collect_from_path(path):
+    path = clean_path(path)
+
+    if os.path.isdir(path):
+        return collect_from_folder(path)
+
+    if os.path.isfile(path):
+        if is_archive_path(path):
+            return collect_from_archive_path(path)
+
+        return [
+            make_file_item(
+                "file",
+                os.path.basename(path),
+                path=os.path.abspath(path),
+                root=os.path.dirname(os.path.abspath(path))
+            )
+        ]
+
+    return []
+
+
+def add_paths_to_file_data(file_data, paths):
+    for p in paths:
+        for item in collect_from_path(p):
+            add_unique_item(file_data, item)
+
+
+def read_text_stream_to_output(outfile, stream):
+    pending = b""
+    detected = False
+    enc = "utf-8"
+
+    while True:
+        chunk = stream.read(1024 * 1024)
+        if not chunk:
+            break
+
+        if not detected:
+            pending += chunk
+
+            if len(pending) >= 8192:
+                enc = detect_encoding_from_bytes(pending[:8192])
+                outfile.write(pending.decode(enc, errors="replace"))
+                pending = b""
+                detected = True
+        else:
+            outfile.write(chunk.decode(enc, errors="replace"))
+
+    if pending:
+        enc = detect_encoding_from_bytes(pending[:8192])
+        outfile.write(pending.decode(enc, errors="replace"))
+
+
+def read_regular_file_to_output(outfile, item):
+    filepath = item["path"]
+    outfile.write(f"--- {item['name']} ---\n")
+
+    enc = detect_encoding(filepath)
+
+    try:
+        with open(filepath, "r", encoding=enc, errors="replace") as infile:
+            while True:
+                chunk = infile.read(1024 * 1024)
+                if not chunk:
+                    break
+                outfile.write(chunk)
+    except Exception as e:
+        outfile.write(f"[Read error: {e}]")
+
+    outfile.write("\n\n\n")
+
+
+def read_archive_item_to_output(outfile, item):
+    outfile.write(f"--- {item['name']} ---\n")
+
+    archive_path = item.get("archive_path")
+    parts = [p for p in item.get("member_chain", "").split("::") if p]
+
+    if not archive_path or not parts:
+        outfile.write("[Archive read error: empty archive chain]\n\n\n")
+        return
+
+    tmp_to_cleanup = []
+
+    try:
+        if len(parts) == 1:
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                with zf.open(parts[0], "r") as src:
+                    read_text_stream_to_output(outfile, src)
+
+        else:
+            current_archive = archive_path
+
+            for idx, part in enumerate(parts):
+                is_last = idx == len(parts) - 1
+
+                with zipfile.ZipFile(current_archive, "r") as zf:
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=path_ext(part))
+                    tmp_path = tmp.name
+
+                    with zf.open(part, "r") as src:
+                        shutil.copyfileobj(src, tmp, length=1024 * 1024)
+
+                    tmp.close()
+
+                tmp_to_cleanup.append(tmp_path)
+
+                if is_last:
+                    with open(tmp_path, "rb") as final_stream:
+                        read_text_stream_to_output(outfile, final_stream)
+                else:
+                    current_archive = tmp_path
+
+    except Exception as e:
+        outfile.write(f"[Archive read error: {e}]")
+
+    finally:
+        for p in tmp_to_cleanup:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+
+    outfile.write("\n\n\n")
+
 
 def show_floating_modal(title, items, bg_draw_func):
     flush_input_events()
+
     max_len = text_width(title) + 10
+
     for item in items:
-        l = text_width(item["label"]) + (text_width(item.get("shortcut", "")) + 4 if item.get("shortcut") else 0)
-        if l > max_len:
-            max_len = l
+        length = text_width(item["label"]) + (text_width(item.get("shortcut", "")) + 4 if item.get("shortcut") else 0)
+        max_len = max(max_len, length)
+
     mw = min(80, max(40, max_len + 6))
     mh = len(items) + 4
+
     sys.stdout.write("\033[?1000h\033[?1002h\033[?1003h\033[?1015h\033[?1006h\033[?25l")
     sys.stdout.flush()
+
     try:
         selectable = [i for i, it in enumerate(items) if it["type"] == "item"]
+
         if not selectable:
             return None
+
         sel_pos = 0
         last_size = (-1, -1)
         force_redraw = True
@@ -729,12 +1300,15 @@ def show_floating_modal(title, items, bg_draw_func):
             nonlocal sel_pos, force_redraw
             best_dist = 99999
             best_idx = sel_pos
+
             for i_sel, row_idx in enumerate(selectable):
                 item_y = sy + 2 + row_idx
                 dist = abs(my - item_y)
+
                 if dist < best_dist:
                     best_dist = dist
                     best_idx = i_sel
+
             if best_idx != sel_pos:
                 sel_pos = best_idx
                 force_redraw = True
@@ -742,29 +1316,47 @@ def show_floating_modal(title, items, bg_draw_func):
         with RawInput():
             while True:
                 tw = get_term_width()
+
                 try:
                     th = os.get_terminal_size().lines
                 except OSError:
                     th = 24
+
                 if (tw, th) != last_size:
                     draw_dimmed_background()
                     last_size = (tw, th)
                     force_redraw = True
+
                 if force_redraw:
                     sx = max(1, (tw - mw) // 2)
                     sy = max(1, (th - mh) // 2)
+
                     title_part = f"  {title}"
                     esc_part = "esc  "
-                    title_spaces = " " * max(0, mw - text_width(title_part) - text_width(esc_part))
+                    spaces = " " * max(0, mw - text_width(title_part) - text_width(esc_part))
+
                     sys.stdout.write(f"\033[{sy};{sx}H")
-                    sys.stdout.write(f"\033[48;2;30;30;30m\033[38;2;210;210;210m{title_part}{title_spaces}\033[38;2;110;110;110m{esc_part}\033[0m")
-                    sys.stdout.write(f"\033[{sy+1};{sx}H\033[48;2;30;30;30m{' ' * mw}\033[0m")
+                    sys.stdout.write(
+                        f"\033[48;2;30;30;30m"
+                        f"\033[38;2;210;210;210m{title_part}"
+                        f"{spaces}"
+                        f"\033[38;2;110;110;110m{esc_part}"
+                        f"\033[0m"
+                    )
+
+                    sys.stdout.write(f"\033[{sy + 1};{sx}H\033[48;2;30;30;30m{' ' * mw}\033[0m")
+
                     for i, item in enumerate(items):
-                        sys.stdout.write(f"\033[{sy+2+i};{sx}H")
+                        sys.stdout.write(f"\033[{sy + 2 + i};{sx}H")
                         is_sel = selectable[sel_pos] == i
+
                         if item["type"] == "category":
                             line = pad_text(f"  {item['label']}", mw)
-                            sys.stdout.write(f"\033[48;2;30;30;30m\033[38;2;0;175;255m{line}\033[0m")
+                            sys.stdout.write(
+                                f"\033[48;2;30;30;30m"
+                                f"\033[38;2;0;175;255m{line}"
+                                f"\033[0m"
+                            )
                         else:
                             bg = "\033[48;2;248;246;117m" if is_sel else "\033[48;2;30;30;30m"
                             fg = "\033[38;2;0;0;0m" if is_sel else "\033[38;2;210;210;210m"
@@ -772,41 +1364,53 @@ def show_floating_modal(title, items, bg_draw_func):
                             lbl = item["label"]
                             sh = item.get("shortcut", "")
                             sp = max(0, mw - text_width(lbl) - text_width(sh) - 4)
+
                             sys.stdout.write(f"{bg}{fg}  {lbl}{' ' * sp}{s_fg}{sh}  \033[0m")
-                    sys.stdout.write(f"\033[{sy+2+len(items)};{sx}H\033[48;2;30;30;30m{' ' * mw}\033[0m")
-                    sys.stdout.write(f"\033[{sy+3+len(items)};{sx}H\033[48;2;30;30;30m{' ' * mw}\033[0m")
+
+                    sys.stdout.write(f"\033[{sy + 2 + len(items)};{sx}H\033[48;2;30;30;30m{' ' * mw}\033[0m")
+                    sys.stdout.write(f"\033[{sy + 3 + len(items)};{sx}H\033[48;2;30;30;30m{' ' * mw}\033[0m")
                     sys.stdout.flush()
                     force_redraw = False
+
                 ev = get_event()
+
                 if ev:
-                    if ev == 'UP':
+                    if ev == "UP":
                         sel_pos = (sel_pos - 1) % len(selectable)
                         force_redraw = True
-                    elif ev == 'DOWN':
+                    elif ev == "DOWN":
                         sel_pos = (sel_pos + 1) % len(selectable)
                         force_redraw = True
-                    elif ev == 'ESC':
+                    elif ev in ("LEFT", "RIGHT", "IGNORE"):
+                        continue
+                    elif ev == "ESC":
                         return None
-                    elif ev == 'ENTER':
+                    elif ev == "ENTER":
                         return items[selectable[sel_pos]]["id"]
                     elif isinstance(ev, tuple):
                         action, mx, my = ev
-                        if action == 'HOVER':
+
+                        if action == "HOVER":
                             update_hover_selection(my)
-                        elif action == 'CLICK':
+                        elif action == "CLICK":
                             update_hover_selection(my)
+
                             if sx <= mx < sx + mw and sy <= my < sy + mh:
                                 row = my - sy - 2
+
                                 if 0 <= row < len(items) and items[row]["type"] == "item":
                                     return items[row]["id"]
                             else:
                                 return None
+
     finally:
         sys.stdout.write("\033[?1006l\033[?1015l\033[?1003l\033[?1002l\033[?1000l\033[0m")
         sys.stdout.flush()
 
+
 def kilo_input(prompt, redraw_callback):
     chars = []
+
     try:
         sys.stdout.write(f"{C_RESET}\033[?25l")
         tw, bw, m = redraw_callback()
@@ -814,25 +1418,39 @@ def kilo_input(prompt, redraw_callback):
         def draw_prompt():
             prefix = f" {prompt} "
             avail = max(1, bw - text_width(prefix))
-            disp = ''.join(chars)
+            disp = "".join(chars)
+
             if text_width(disp) > avail:
                 while text_width(disp) > avail - 3 and disp:
                     disp = disp[1:]
                 disp = "..." + disp
+
             spaces = max(0, bw - text_width(prefix) - text_width(disp))
-            box_render = f"\r{m}{C_BLUE}▌{C_BG_INPUT}{C_GRAY}{prefix}{C_WHITE}{disp}{' ' * spaces}{C_RESET}"
+
+            box_render = (
+                f"\r{m}{C_BLUE}▌"
+                f"{C_BG_INPUT}{C_GRAY}{prefix}"
+                f"{C_WHITE}{disp}"
+                f"{' ' * spaces}{C_RESET}"
+            )
+
             sys.stdout.write(box_render)
+
             if spaces > 0:
                 sys.stdout.write(f"\033[{spaces}D")
+
             sys.stdout.flush()
 
         draw_prompt()
         sys.stdout.write(f"{C_WHITE}\033[?25h")
         sys.stdout.flush()
+
         last_size = get_term_width()
+
         with RawInput():
             while True:
                 ev = get_event()
+
                 curr_size = get_term_width()
                 if curr_size != last_size:
                     last_size = curr_size
@@ -840,44 +1458,61 @@ def kilo_input(prompt, redraw_callback):
                     tw, bw, m = redraw_callback()
                     sys.stdout.write(f"{C_WHITE}\033[?25h")
                     draw_prompt()
-                if ev == 'ESC':
+
+                if ev in ("LEFT", "RIGHT", "UP", "DOWN", "IGNORE"):
+                    continue
+
+                if ev == "ESC":
                     sys.stdout.write(f"{C_RESET}\033[?25l")
-                    return 'esc'
-                elif ev == 'ENTER':
-                    sys.stdout.write('\n')
+                    return "esc"
+
+                if ev == "ENTER":
+                    sys.stdout.write("\n")
                     sys.stdout.flush()
                     sys.stdout.write(f"{C_RESET}\033[?25l")
-                    return ''.join(chars)
-                elif ev == 'BACKSPACE':
+                    return "".join(chars)
+
+                if ev == "BACKSPACE":
                     if chars:
                         chars.pop()
                         draw_prompt()
+
                 elif isinstance(ev, str) and len(ev) == 1:
                     chars.append(ev)
                     draw_prompt()
+
     except KeyboardInterrupt:
         sys.stdout.write(f"{C_RESET}\033[?1049l\033[?25h\n")
         sys.stdout.flush()
         sys.exit(0)
+
     except EOFError:
         sys.stdout.write(f"{C_RESET}\033[?25l")
         sys.stdout.flush()
-        return 'esc'
+        return "esc"
+
 
 def is_esc(val):
-    return val.lower() in ('esc', 'q', '\x1b', 'exit')
+    if val is None:
+        return False
+    return val.lower() in ("esc", "q", "\x1b", "exit")
 
-def draw_header(m, bw, title):
-    spaces = " " * max(1, bw - text_width(title) - 3)
-    print(f"{m}{C_WHITE}{C_BOLD}{title}{C_RESET}{spaces}{C_GRAY}esc{C_RESET}\n")
 
-def draw_menu_item(m, num, text):
-    print(f"{m}{C_YELLOW}{num}{C_RESET}  {C_WHITE}{text}{C_RESET}")
+def draw_message_screen(lang, title_key, message, prompt_key="press_enter_return"):
+    t = T[lang]
 
-def draw_sys_item(m, bw, label, value):
-    label_disp = label + "   "
-    val_disp = truncate_text(value, bw - text_width(label_disp))
-    print(f"{m}{C_WHITE}{label_disp}{C_RESET}{C_GRAY}{val_disp}{C_RESET}")
+    def draw_msg():
+        clear_screen(13)
+        draw_logo()
+        tw, bw, m = get_layout()
+        draw_header(m, bw, t[title_key])
+        print()
+        print_wrapped_text(message, m, bw, C_YELLOW)
+        print()
+        return tw, bw, m
+
+    kilo_input(f"{t[prompt_key]}:", draw_msg)
+
 
 def settings_menu(lang, output_dir):
     while True:
@@ -888,12 +1523,15 @@ def settings_menu(lang, output_dir):
             draw_logo()
             tw, bw, m = get_layout()
             draw_header(m, bw, t["commands"])
+
             print(f"{m}{C_BLUE}{t['actions']}{C_RESET}")
             draw_menu_item(m, "1", t["start"])
             draw_menu_item(m, "2", t["settings"])
             print()
+
             print(f"{m}{C_BLUE}{t['system']}{C_RESET}")
             draw_sys_item(m, bw, t["output_path"], output_dir)
+
             print_tip(t["tip_main"], m, bw)
 
         items = [
@@ -901,10 +1539,13 @@ def settings_menu(lang, output_dir):
             {"type": "item", "id": "path", "label": t["change_path"]},
             {"type": "item", "id": "lang", "label": t["change_lang"]}
         ]
+
         choice = show_floating_modal(t["settings"], items, draw_bg)
+
         if not choice:
             break
-        elif choice == 'path':
+
+        elif choice == "path":
             def draw_path_bg():
                 clear_screen(15)
                 draw_logo()
@@ -912,34 +1553,35 @@ def settings_menu(lang, output_dir):
                 draw_header(m, bw, t["settings"])
                 print()
                 return tw, bw, m
+
             raw_path = kilo_input(t["new_path"], draw_path_bg)
+
             if not is_esc(raw_path) and raw_path:
                 new_path = clean_path(raw_path)
+
                 try:
                     os.makedirs(new_path, exist_ok=True)
                     output_dir = new_path
                     save_config(lang, output_dir)
                 except Exception as e:
-                    def draw_err():
-                        clear_screen(15)
-                        draw_logo()
-                        tw, bw, m = get_layout()
-                        draw_header(m, bw, t["settings"])
-                        print(f"\n{m}{C_YELLOW}Error: {e}{C_RESET}\n")
-                        return tw, bw, m
-                    kilo_input(f"{t['press_enter_return']}:", draw_err)
-        elif choice == 'lang':
+                    draw_message_screen(lang, "settings", f"Error: {e}")
+
+        elif choice == "lang":
             lang_items = [
                 {"type": "category", "label": t["language"]},
                 {"type": "item", "id": "en", "label": "English"},
                 {"type": "item", "id": "ru", "label": "Русский"},
                 {"type": "item", "id": "zh", "label": "中文"}
             ]
+
             new_lang = show_floating_modal(t["change_lang"], lang_items, draw_bg)
+
             if new_lang:
                 lang = new_lang
                 save_config(lang, output_dir)
+
     return lang, output_dir
+
 
 def main_menu(lang, output_dir):
     while True:
@@ -950,30 +1592,29 @@ def main_menu(lang, output_dir):
             draw_logo()
             tw, bw, m = get_layout()
             draw_header(m, bw, t["commands"])
+
             print(f"{m}{C_BLUE}{t['actions']}{C_RESET}")
             draw_menu_item(m, "1", t["start"])
             draw_menu_item(m, "2", t["settings"])
             print()
+
             print(f"{m}{C_BLUE}{t['system']}{C_RESET}")
             draw_sys_item(m, bw, t["output_path"], output_dir)
+
             print_tip(t["tip_main"], m, bw)
             return tw, bw, m
 
         choice = kilo_input(t["action"], draw_main)
+
         if is_esc(choice):
             continue
-        elif choice == '1':
+
+        elif choice == "1":
             run_script(lang, output_dir)
-        elif choice == '2':
+
+        elif choice == "2":
             lang, output_dir = settings_menu(lang, output_dir)
 
-def get_all_files(target_dir):
-    result = []
-    for root, dirs, files in os.walk(target_dir):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
-        for f in files:
-            result.append(os.path.join(root, f))
-    return result
 
 def run_script(lang, output_dir):
     t = T[lang]
@@ -983,263 +1624,214 @@ def run_script(lang, output_dir):
         draw_logo()
         tw, bw, m = get_layout()
         draw_header(m, bw, t["target_dir"])
+
         print(f"{m}{C_BLUE}{t['input']}{C_RESET}")
-        print(f"{m}{C_GRAY}{t['enter_path']}{C_RESET}\n")
+        print_wrapped_text(t["enter_path"], m, bw, C_GRAY)
+        print()
+
         return tw, bw, m
 
     raw_path = kilo_input(t["path"], draw_target)
+
     if is_esc(raw_path):
         return
+
     paths = parse_dropped_paths(raw_path)
+
     if not paths:
-        def draw_not_found():
-            clear_screen(13)
-            draw_logo()
-            tw, bw, m = get_layout()
-            draw_header(m, bw, t["target_dir"])
-            print(f"\n{m}{C_YELLOW}{t['err_not_found']}{C_RESET}\n")
-            return tw, bw, m
-        kilo_input(f"{t['press_enter_return']}:", draw_not_found)
+        draw_message_screen(lang, "target_dir", t["err_not_found"])
         return
 
-    temp_dir = None
+    file_data = []
+
     try:
-        all_items = []
-        for p in paths:
-            if os.path.isfile(p):
-                if p.lower().endswith('.zip') and zipfile.is_zipfile(p):
-                    if not temp_dir:
-                        temp_dir = tempfile.mkdtemp(prefix="merge_zip_")
-                    try:
-                        with zipfile.ZipFile(p, 'r') as zip_ref:
-                            zip_ref.extractall(temp_dir)
-                        all_items.extend(get_all_files(temp_dir))
-                    except Exception:
-                        pass
+        add_paths_to_file_data(file_data, paths)
+    except PermissionError:
+        draw_message_screen(lang, "target_dir", t["err_permission"])
+        return
+    except Exception as e:
+        draw_message_screen(lang, "target_dir", f"{t['err_bad_archive']} {e}")
+        return
+
+    if not file_data:
+        draw_message_screen(lang, "target_dir", t["err_empty"])
+        return
+
+    sources_display = ", ".join(paths)
+
+    memory_key = paths[0] if len(paths) == 1 else sources_display
+    disabled_files = load_memory().get(os.path.abspath(memory_key), {}).get("disabled_files", [])
+
+    for item in file_data:
+        if item["name"] in disabled_files and not item.get("locked"):
+            item["selected"] = False
+
+    while True:
+        def draw_selection():
+            display_limit = 160
+            total_lines = 17 + min(len(file_data), display_limit)
+
+            if len(file_data) > display_limit:
+                total_lines += 1
+
+            clear_screen(total_lines)
+            draw_logo()
+            tw, bw, m = get_layout()
+            draw_header(m, bw, t["select_files"])
+
+            print(f"{m}{C_BLUE}{t['sources']}{C_RESET}")
+            print_wrapped_text(truncate_text(sources_display, bw * 3), m, bw, C_WHITE)
+            print()
+
+            print(f"{m}{C_BLUE}{t['files']}{C_RESET}")
+
+            for i, item in enumerate(file_data[:display_limit]):
+                num = str(i + 1)
+                suffix = f" [{t['locked']}]" if item.get("locked") else ""
+                file_disp = truncate_text(item["name"] + suffix, bw - 7)
+
+                if item.get("locked"):
+                    print(f"{m}{C_DARK_GRAY}{num:<3} {file_disp}{C_RESET}")
+                elif item["selected"]:
+                    print(f"{m}{C_WHITE}{num:<3}{C_RESET} {C_WHITE}{file_disp}{C_RESET}")
                 else:
-                    all_items.append(p)
-            elif os.path.isdir(p):
-                all_items.extend(get_all_files(p))
+                    print(f"{m}{C_DARK_GRAY}{num:<3} {file_disp}{C_RESET}")
 
-        unique_items = []
-        seen = set()
-        for p in all_items:
-            ap = os.path.abspath(p)
-            if ap not in seen:
-                seen.add(ap)
-                unique_items.append(p)
-        all_items = unique_items
+            if len(file_data) > display_limit:
+                rem = len(file_data) - display_limit
+                print(f"{m}{C_GRAY}... +{rem}{C_RESET}")
 
-        if not all_items:
-            def draw_empty():
-                clear_screen(13)
-                draw_logo()
-                tw, bw, m = get_layout()
-                draw_header(m, bw, t["target_dir"])
-                print(f"\n{m}{C_YELLOW}{t['err_empty']}{C_RESET}\n")
-                return tw, bw, m
-            kilo_input(f"{t['press_enter_return']}:", draw_empty)
+            selected_count = sum(1 for item in file_data if item["selected"])
+            total_count = len(file_data)
+
+            print(
+                f"\n{m}{C_GRAY}{t['selected']} "
+                f"{C_WHITE}{selected_count}{C_GRAY} "
+                f"{t['of']} {total_count}{C_RESET}"
+            )
+
+            print_tip(t["tip_toggle"], m, bw)
+            return tw, bw, m
+
+        choice = kilo_input(t["toggle"], draw_selection).strip()
+
+        if is_esc(choice):
             return
 
-        if temp_dir:
-            target_dir = temp_dir
-            original_target_dir = paths[0]
-        else:
-            if len(paths) == 1 and os.path.isdir(paths[0]):
-                target_dir = paths[0]
-            else:
-                target_dir = os.path.dirname(paths[0])
-            original_target_dir = target_dir
+        elif choice == "0":
+            break
 
-        file_data = []
-        for full_p in all_items:
-            try:
-                f_name = os.path.relpath(full_p, target_dir)
-                if f_name.startswith("..") or os.path.isabs(f_name):
-                    f_name = os.path.basename(full_p)
-            except ValueError:
-                f_name = os.path.basename(full_p)
-            if not (os.path.basename(full_p).startswith("extracted_data_") and full_p.endswith(".txt")):
-                if not is_binary(full_p):
-                    file_data.append({"path": full_p, "name": f_name, "selected": True})
+        elif choice:
+            more_paths = parse_dropped_paths(choice)
 
-        if not file_data:
-            def draw_empty2():
-                clear_screen(13)
-                draw_logo()
-                tw, bw, m = get_layout()
-                draw_header(m, bw, t["target_dir"])
-                print(f"\n{m}{C_YELLOW}{t['err_empty']}{C_RESET}\n")
-                return tw, bw, m
-            kilo_input(f"{t['press_enter_return']}:", draw_empty2)
-            return
-
-        memory = load_memory()
-        abs_dir = os.path.abspath(original_target_dir)
-        disabled_files = memory.get(abs_dir, {}).get("disabled_files", [])
-        for item in file_data:
-            if item["name"] in disabled_files:
-                item["selected"] = False
-
-        def add_or_select_file(f_list, new_path):
-            abs_p = os.path.abspath(new_path)
-            for i in f_list:
-                if os.path.abspath(i["path"]) == abs_p:
-                    i["selected"] = True
-                    return
-            if not is_binary(abs_p):
+            if more_paths:
                 try:
-                    f_n = os.path.relpath(abs_p, target_dir)
-                    if f_n.startswith("..") or os.path.isabs(f_n):
-                        f_n = os.path.basename(abs_p)
-                except ValueError:
-                    f_n = os.path.basename(abs_p)
-                f_list.append({"path": abs_p, "name": f_n, "selected": True})
+                    add_paths_to_file_data(file_data, more_paths)
+                    sources_display += ", " + ", ".join(more_paths)
+                except Exception:
+                    pass
+                continue
 
-        while True:
-            def draw_selection():
-                display_limit = 100
-                total_lines = 17 + min(len(file_data), display_limit)
-                if len(file_data) > display_limit:
-                    total_lines += 1
-                clear_screen(total_lines)
-                draw_logo()
-                tw, bw, m = get_layout()
-                draw_header(m, bw, t["select_files"])
-                dir_display = truncate_text(original_target_dir, bw)
-                print(f"{m}{C_BLUE}{t['dir']}{C_RESET}")
-                print(f"{m}{C_WHITE}{dir_display}{C_RESET}\n")
-                print(f"{m}{C_BLUE}{t['files']}{C_RESET}")
-                for i, item in enumerate(file_data[:display_limit]):
-                    file_disp = truncate_text(item["name"], bw - 6)
-                    num = str(i + 1)
-                    if item["selected"]:
-                        print(f"{m}{C_WHITE}{num:<3}{C_RESET} {C_WHITE}{file_disp}{C_RESET}")
-                    else:
-                        print(f"{m}{C_DARK_GRAY}{num:<3} {file_disp}{C_RESET}")
-                if len(file_data) > display_limit:
-                    rem = len(file_data) - display_limit
-                    print(f"{m}{C_GRAY}... {rem} more files{C_RESET}")
-                selected_count = sum(1 for item in file_data if item["selected"])
-                total_count = len(file_data)
-                print(f"\n{m}{C_GRAY}{t['selected']} {C_WHITE}{selected_count}{C_GRAY} {t['of']} {total_count}{C_RESET}")
-                print_tip(t["tip_toggle"], m, bw)
-                return tw, bw, m
+            try:
+                tokens = shlex.split(choice, posix=(os.name == "posix"))
+            except ValueError:
+                tokens = choice.split()
 
-            choice = kilo_input(t["toggle"], draw_selection).strip()
-            if is_esc(choice):
-                return
-            elif choice == '0':
-                break
-            elif choice:
-                c_choice = clean_path(choice)
-                if os.path.exists(c_choice) and os.path.isfile(c_choice):
-                    add_or_select_file(file_data, c_choice)
-                else:
-                    try:
-                        tokens = shlex.split(choice, posix=(os.name == 'posix'))
-                    except ValueError:
-                        tokens = choice.split()
-                    for tok in tokens:
-                        if tok.isdigit():
-                            idx = int(tok) - 1
-                            if 0 <= idx < len(file_data):
-                                file_data[idx]["selected"] = not file_data[idx]["selected"]
-                        else:
-                            ct = clean_path(tok)
-                            if os.path.exists(ct) and os.path.isfile(ct):
-                                add_or_select_file(file_data, ct)
+            for tok in tokens:
+                if tok.isdigit():
+                    idx = int(tok) - 1
 
-        if not any(item["selected"] for item in file_data):
-            def draw_no_sel():
-                clear_screen(13)
-                draw_logo()
-                tw, bw, m = get_layout()
-                draw_header(m, bw, t["select_files"])
-                print(f"\n{m}{C_YELLOW}{t['err_no_selected']}{C_RESET}\n")
-                return tw, bw, m
-            kilo_input(f"{t['press_enter_return']}:", draw_no_sel)
-            return
+                    if 0 <= idx < len(file_data):
+                        if file_data[idx].get("locked"):
+                            continue
+                        file_data[idx]["selected"] = not file_data[idx]["selected"]
 
-        disabled_to_save = [item["name"] for item in file_data if not item["selected"]]
-        save_memory(original_target_dir, disabled_to_save)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_file = os.path.join(output_dir, f"extracted_data_{timestamp}.txt")
+    if not any(item["selected"] for item in file_data):
+        draw_message_screen(lang, "select_files", t["err_no_selected"])
+        return
 
-        try:
-            os.makedirs(output_dir, exist_ok=True)
+    disabled_to_save = [
+        item["name"]
+        for item in file_data
+        if not item["selected"] and not item.get("locked")
+    ]
+    save_memory(memory_key, disabled_to_save)
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_file = os.path.join(output_dir, f"extracted_data_{timestamp}.txt")
+
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+
+        clear_screen(15)
+        draw_logo()
+        tw, bw, m = get_layout()
+        draw_header(m, bw, t["actions"])
+        print(f"\n{m}{C_BLUE}{t.get('exporting', 'Exporting:')}{C_RESET}")
+        sys.stdout.write("\033[s")
+
+        with open(out_file, "w", encoding="utf-8") as outfile:
+            selected_items = [
+                item
+                for item in file_data
+                if item["selected"] and not item.get("locked")
+            ]
+
+            total = len(selected_items)
+
+            for idx, item in enumerate(selected_items, 1):
+                sys.stdout.write("\033[u\033[J")
+                sys.stdout.write(
+                    f"{m}{C_WHITE}{idx} / {total} : "
+                    f"{truncate_text(item['name'], bw - 15)}"
+                    f"{C_RESET}\n"
+                )
+                sys.stdout.flush()
+
+                if item.get("source") == "file":
+                    read_regular_file_to_output(outfile, item)
+                elif item.get("source") == "archive":
+                    read_archive_item_to_output(outfile, item)
+
+        def draw_success():
             clear_screen(15)
             draw_logo()
             tw, bw, m = get_layout()
-            draw_header(m, bw, t["actions"])
-            print(f"\n{m}{C_BLUE}{t.get('exporting', 'Exporting:')}{C_RESET}")
-            sys.stdout.write("\033[s")
-            with open(out_file, 'w', encoding='utf-8') as outfile:
-                selected_items = [item for item in file_data if item["selected"]]
-                total = len(selected_items)
-                for idx, item in enumerate(selected_items, 1):
-                    sys.stdout.write("\033[u\033[J")
-                    sys.stdout.write(f"{m}{C_WHITE}{idx} / {total} : {truncate_text(item['name'], bw - 15)}{C_RESET}\n")
-                    sys.stdout.flush()
-                    filepath = item["path"]
-                    outfile.write(f"--- {item['name']} ---\n")
-                    enc = detect_encoding(filepath)
-                    try:
-                        with open(filepath, 'r', encoding=enc, errors='replace') as infile:
-                            while True:
-                                chunk = infile.read(1024 * 1024)
-                                if not chunk:
-                                    break
-                                outfile.write(chunk)
-                    except Exception as e:
-                        outfile.write(f"[Read error: {e}]")
-                    outfile.write("\n\n\n")
+            draw_header(m, bw, t["success"])
 
-            def draw_success():
-                clear_screen(15)
-                draw_logo()
-                tw, bw, m = get_layout()
-                draw_header(m, bw, t["success"])
-                print(f"{m}{C_WHITE}{t['success_msg']}{C_RESET}\n")
-                print(f"{m}{C_BLUE}{t['output_loc']}{C_RESET}")
-                out_display = truncate_text(out_file, bw)
-                print(f"{m}{C_WHITE}{out_display}{C_RESET}\n")
-                return tw, bw, m
-            kilo_input(f"{t['press_enter_return']}:", draw_success)
-        except Exception as e:
-            def draw_save_err():
-                clear_screen(15)
-                draw_logo()
-                tw, bw, m = get_layout()
-                draw_header(m, bw, t["system"])
-                print(f"\n{m}{C_YELLOW}{t['err_save']} {e}{C_RESET}\n")
-                return tw, bw, m
-            kilo_input(f"{t['press_enter_return']}:", draw_save_err)
+            print(f"{m}{C_WHITE}{t['success_msg']}{C_RESET}\n")
+            print(f"{m}{C_BLUE}{t['output_loc']}{C_RESET}")
+            print(f"{m}{C_WHITE}{truncate_text(out_file, bw)}{C_RESET}\n")
 
-    except PermissionError:
-        def draw_perm():
-            clear_screen(13)
+            return tw, bw, m
+
+        kilo_input(f"{t['press_enter_return']}:", draw_success)
+
+    except Exception as e:
+        def draw_save_err():
+            clear_screen(15)
             draw_logo()
             tw, bw, m = get_layout()
-            draw_header(m, bw, t["target_dir"])
-            print(f"\n{m}{C_YELLOW}{t['err_permission']}{C_RESET}\n")
+            draw_header(m, bw, t["system"])
+            print()
+            print_wrapped_text(f"{t['err_save']} {e}", m, bw, C_YELLOW)
+            print()
             return tw, bw, m
-        kilo_input(f"{t['press_enter_return']}:", draw_perm)
-    finally:
-        if temp_dir and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
+
+        kilo_input(f"{t['press_enter_return']}:", draw_save_err)
+
 
 if __name__ == "__main__":
     sys.stdout.write("\033[?1049h\033[?25l")
     sys.stdout.flush()
+
     try:
         init_lang, init_out = load_config()
         main_menu(init_lang, init_out)
+
     except KeyboardInterrupt:
         pass
+
     finally:
         sys.stdout.write(f"{C_RESET}\033[?1049l\033[?25h")
         sys.stdout.flush()
